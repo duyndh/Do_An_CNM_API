@@ -1,7 +1,7 @@
 var passport = require('passport');
 var mongoose= require('mongoose');
 var User = require('../model/user');
-var Transaction = require('../model/transaction');
+var Balance = require('../model/balance');
 const nodemailer = require('nodemailer');
 var randomstring = require("randomstring");
 
