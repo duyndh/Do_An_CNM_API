@@ -1,6 +1,6 @@
-let mongoose = require('mongoose');
+var mongoose = require('mongoose');
 
-let TransactionSchema = new mongoose.Schema(
+var TransactionSchema = new mongoose.Schema(
     {
         src_hash: {type: String},
         send_address: {type: String, required: true},

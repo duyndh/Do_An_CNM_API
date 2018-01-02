@@ -1,7 +1,4 @@
 var mongoose= require('mongoose');
-var Schema = mongoose.Schema;
-var bcrypt = require('bcrypt-nodejs');
-
 
 
 var balanceSchema = new mongoose.Schema(
@@ -14,6 +11,4 @@ var balanceSchema = new mongoose.Schema(
     }
 );
 
-var Balance = module.exports = mongoose.model('Balance', balanceSchema, 'balance');
-
-module.exports = mongoose.model('Balance',balanceSchema);
+module.exports = mongoose.model('Balance',balanceSchema, 'balance');
