@@ -32,38 +32,38 @@ router.post('/register', function(req,res,next){
                 message: 'Email is already in use'
             });
         }
-    });
-    var newUser = new User();
-    var newBalance = new Balance();
-    var private_key = ursa.generatePrivateKey(1024, 65537);
-    var public_key = private_key.toPublicPem();
-    
-    newUser.name = name;
-    newUser.email = email;
-    newUser.password = newUser.encryptPassword(password);
-    newUser.is_active=0;
-    newUser.transaction_id = newBalance._id;
-    newBalance.address = Hash(public_key).toString('hex'); 
-    newBalance.real_balance = 0;
-    newBalance.usable_balance = 0;
-    newBalance.public_key = public_key;
-    newBalance.private_key = private_key;
-
-    newBalance.save(function(error,result){
-        if(error){
-            res.json({
-                status: 0,
-                message: 'Register failed'
-            });
-        }
-        newUser.save(function(error, result){
+        if (!data){
+            var newUser = new User();
+            var newBalance = new Balance();
+            var private_key = ursa.generatePrivateKey(1024, 65537);
+            var public_key = private_key.toPublicPem();
+            
+            newUser.name = name;
+            newUser.email = email;
+            newUser.password = newUser.encryptPassword(password);
+            newUser.is_active=0;
+            newUser.balance_id = newBalance._id;
+            newBalance.address = Hash(public_key).toString('hex'); 
+            newBalance.real_balance = 0;
+            newBalance.usable_balance = 0;
+            newBalance.public_key = public_key.toString('hex');
+            newBalance.private_key = private_key.toPrivatePem('hex');
+            newBalance.save(function(error,newbalance){
             if(error){
                 res.json({
                     status: 0,
                     message: 'Register failed'
                 });
-                return;
             }
+            newUser.save(function(error, result){
+                console.log(result);
+                if(error){
+                    res.json({
+                        status: 0,
+                        message: 'Register failed'
+                    });
+                    return;
+                }
                 var user_id = newUser.id;
                 // set activation email
                 var mailOptions = {
@@ -71,7 +71,7 @@ router.post('/register', function(req,res,next){
                 to: email, // list of receivers
                 subject: 'Activation', // Subject line
                 text: 'Hello world ?', // plain text body
-                html: 'Click <b><a href="'+ req.protocol + "://" + req.get('host') +'/active/'+ user_id +'">here</a></b> to active your account.' // html body
+                html: 'Click <b><a href="'+ req.protocol + "://" + req.get('host') +'/kcoin-api/active/'+ user_id +'">here</a></b> to active your account.' // html body
             };
             email_transporter.sendMail(mailOptions, function (error, info) {
                 if (error) {
@@ -88,12 +88,15 @@ router.post('/register', function(req,res,next){
             });
         });
     });
+        }
+    });
+    
 });
 router.post('/user-dashboard',function(req,res,next){
-    var id = req.body.balance_id;
+    var balance_address = req.body.balance_address;
     var user_usable_balance = 0;
     var user_current_balance = 0;
-    Balance.findById( id,function(error,data){
+    Balance.findOne({address: balance_address},function(error,data){
         if (error){
             res.json({
                 status: 0,
@@ -101,23 +104,32 @@ router.post('/user-dashboard',function(req,res,next){
             });
             
         }
-
       user_usable_balance = data.usable_balance;
       user_current_balance = data.real_balance;
-      res.json({
-        status: 1,
-        message: 'Get data success',
-        data: {
-            name: user.name,
-            address: data.address,
-            usable_balance : data.usable_balance,
-            current_balance : data.current_balance
+      User.findOne({balance_id:data._id},function(error,user){
+        if (error){
+            res.json({
+                status: 0,
+                message: 'Get user fail'
+            });
+            
         }
+        res.json({
+            status: 1,
+            message: 'Get data success',
+            data: {
+                name: user.name,
+                address: data.address,
+                usable_balance : user_usable_balance,
+                current_balance : user_current_balance
+            }
+      });
+     
     });
     
     });
 });
-router.get('/activate/:id', function(req,res,next){
+router.get('/active/:id', function(req,res,next){
     User.findOne({_id:req.params.id},function (err,user) {
         if (err) {
             res.json({
@@ -136,10 +148,11 @@ router.get('/activate/:id', function(req,res,next){
                 });
                 
             }
-            res.json({
-                status: 1,
-                message: 'Active success'
-            });
+            // res.json({
+            //     status: 1,
+            //     message: 'Active success'
+            // });
+            res.redirect('http://localhost:3000/user/signin');
            
          });
  
@@ -154,14 +167,14 @@ router.post('/signin', function(req,res,next){
                 status: 0,
                 message: 'User not found!'
             });
-        
+            return;
         }
         if (user.is_active == 0) {
             res.json({
                 status: 0,
                 message: 'This user account has not been activated yet!'
             });
-           
+            return;
         }
         if (user.validPassword(password)){
             Balance.findById(user.balance_id,function(error,data){
@@ -170,19 +183,20 @@ router.post('/signin', function(req,res,next){
                         status: 0,
                         message: 'Get user data fail'
                     });
-                   
+                    return;
                 }
                 res.json({
                     status: 1,
                     message: 'Login success',      
                     data: {
                         name: user.name,
-                        address: data,
+                        address: data.address,
                         usable_balance : data.usable_balance,
-                        current_balance : data.current_balance
+                        current_balance : data.real_balance,
+                        balance_id: data._id
                     }
                 });
-               
+                return;
             });
             
         }else{
@@ -190,7 +204,7 @@ router.post('/signin', function(req,res,next){
                 status: 0,
                 message: 'Login fail'
             });
-            
+            return;
         }
     });
 
@@ -204,14 +218,14 @@ router.post('/forgotpwd', function(req,res,next){
                 status: 0,
                 message: 'Error'
             });
-            
+            return;
         }
         if (!user) {
             res.json({
                 status: 0,
                 message: 'User not found'
             });
-            
+            return;
         }
         
         var p = randomstring.generate(6);
@@ -223,13 +237,13 @@ router.post('/forgotpwd', function(req,res,next){
                     status: 0,
                     message: 'Error'
                 });
-                
+                return;
             }
             var mailOptions = {
                 from: 'KCoin Management <duyychiha9@gmail.com>',
                 to: M, // list of receivers
                 subject: 'Forgotpassword', // Subject line
-                text: 'Your new-password ' + p// plain text body
+                text: 'Your new-password: ' + p// plain text body
 
             };
             email_transporter.sendMail(mailOptions, function (error, info) {
@@ -238,14 +252,14 @@ router.post('/forgotpwd', function(req,res,next){
                         status: 0,
                         message: 'Send email fail'
                     });
-                   
+                    return;
                 }
             });
             res.json({
                 status: 1,
                 message: 'Password reset'
             });
-            
+            return;
         });
     });
 });
@@ -290,14 +304,14 @@ router.post('/create-transaction', function(req,res,next){
                     status: 0,
                     message: 'Get user balance fail'
                 });
-                
+                return;
             }
             if (data.usable_balance < amount){
                 res.json({
                     status: 0,
                     message: 'Not enough money'
                 });
-                
+                return;
             }
             var check = Balance.find({address:receive_address},function(error,local_address){
                 if (error){
@@ -305,7 +319,7 @@ router.post('/create-transaction', function(req,res,next){
                         status: 0,
                         message: 'An error occurs'
                     });
-                    
+                    return;
                 }
                 if (!local_address){
                     var server_balance = getserverbalance();
@@ -314,7 +328,7 @@ router.post('/create-transaction', function(req,res,next){
                             status: 0,
                             message: 'Service not available.'
                         });
-                       
+                        return;
                     }
                 }
 
@@ -325,7 +339,7 @@ router.post('/create-transaction', function(req,res,next){
                         status: 0,
                         message: 'Transaction created fail'
                     });
-                    
+                    return;
                 }
                 var current_time =  new Date();
                 newTransaction.send_address = send_addressl;
@@ -341,16 +355,17 @@ router.post('/create-transaction', function(req,res,next){
                     data: {
                         transaction_id: newTransaction._id
                     }
+
                 });
+                return;
             });
         });
     });   
 });
-//router.get('/send-create-transaction-confirmation-email/:transactionId', TransactionController.SendCreateTransactionConfirmationEmail);
 function get_user_by_id(user_id){
     User.findById(user_id,function(error,user){
         if(error){
-            return 0;
+            return ;
         }
        return user;
     });
@@ -548,14 +563,14 @@ function update_strans(transactions) {
     });
 }
 function get_remote_trans_by_hash(hash, index) {
-        RemoteTransaction.findOne({src_hash: hash, index}, function (error, transaction) {
+        Transaction.findOne({src_hash: hash, index}, function (error, transaction) {
             return(transaction);
     })
 }
-function create_trans(newRemoteTx) {
-        newRemoteTx.created_at = Date.now();
-        var newObj = new Transaction(newRemoteTx);
-        newObj.save(function (err, tx) {
+function create_trans(trans) {
+        trans.created_at = Date.now();
+        var new_trans = new Transaction(trans);
+        new_trans.save(function (err, tx) {
             return(tx);
         });
 }
@@ -573,17 +588,17 @@ router.get('/sync-latest-blocks', function (req, res, next){
             var block = blocks[i];
             var transactions = block.transactions;
             for (var index in transactions) {
-                var transaction = transactions[i];
+                var transaction = transactions[index];
                 var outputs = transaction.outputs;
                 var hash = transaction.hash;
                 for (var outputIndex in outputs) {
                     var output = outputs[outputIndex];
                     var value = output.value;
                     var lockScript = output.lockScript;
-                    var dstAddress = lockScript.split(" ")[1];
+                    var receive_address = lockScript.split(" ")[1];
         
                     // confirm pending transaction
-                    var pendingTransaction =  get_remote_trans_by_hash(dstAddress);
+                    var pendingTransaction =  get_remote_trans_by_hash(receive_address);
                     if (pendingTransaction) {
                         pendingTransaction.remaining_amount = pendingTransaction.amount - value;
                         pendingTransaction.status           = 'pending';
@@ -593,24 +608,24 @@ router.get('/sync-latest-blocks', function (req, res, next){
                     }
         
                     // sync new transaction
-                    var user = get_user_by_address(dstAddress);
+                    var user = get_user_by_address(receive_address);
                     let existingRemoteTransaction =  get_remote_trans_by_hash(hash, outputIndex);
                     if (!existingRemoteTransaction && user) {
                         let remoteRemoteTransactionData = {
                             send_address: hash,
                             index: outputIndex,
-                            receive_address: dstAddress,
+                            receive_address: receive_address,
                             amount: value,
-                            status: CONFIGS.REMOTE_TRANSACTION_STATUS.FREE,
+                            status: 'available',
                         };
                         let newRemoteTransaction        =  create_trans(remoteRemoteTransactionData);
         
                         let localTransactionData = {
                             send_address: '',
-                            receive_address: dstAddress,
+                            receive_address: receive_address,
                             amount: value,
                             remaining_amount: 0,
-                            status: CONFIGS.LOCAL_TRANSACTION_STATUS.DONE,
+                            status: 'done',
                         };
                         let newLocalTransaction  =  create_trans(localTransactionData);
                     }
@@ -626,6 +641,5 @@ router.get('/sync-latest-blocks', function (req, res, next){
     
         
 });
-//router.get('/sync-block/:blockId', TransactionController.SyncBlock);
 
 module.exports = router;
