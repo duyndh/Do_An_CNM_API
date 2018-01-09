@@ -51,12 +51,14 @@ function createAddress(res, user)
   // Start the request
   request(options, function (error, response, body) {
     if (!error && response.statusCode == 200) {
+        console.log(JSON.parse(body));
     var user_instance = new User();
     user_instance._id = user._id;
     //user_instance.address = JSON.parse(body).address;
     user_instance.address = JSON.parse(body).address;
-    user_instance.publicKey = JSON.parse(body).publicKey;
-    user_instance.privateKey = JSON.parse(body).privateKey;
+    user_instance.public_key = JSON.parse(body).publicKey;
+    user_instance.private_key = JSON.parse(body).privateKey;
+    console.log(user_instance);
     User.findByIdAndUpdate(user._id,user_instance,{}).exec(function (err, newUser) {
         if (err){
             res.json({
@@ -136,7 +138,7 @@ router.post('/register', function(req,res,next){
 
 
 function get_l_trans (address, sort = null, offset = 0, limit = 10) {
-        let query = LocalTransaction.find({
+        let query = Transaction.find({
             $or: [
                 {src_addr: address},
                 {
@@ -189,7 +191,7 @@ function get_balance(address, type = 'available') {
 
 
 router.post('/user-dashboard',function(req,res,next){
-    var balance_address = req.body.address;
+    var balance_address = req.body.balance_address;
     var user_usable_balance = 0;
     var user_current_balance = 0;
 
@@ -253,6 +255,7 @@ router.post('/signin', function(req,res,next){
     var email    = req.body.email;
     var password = req.body.password;
     User.findOne({email: email}, function (error, user) {
+
         if (!user) {
             res.json({
                 status: 0,
@@ -268,6 +271,7 @@ router.post('/signin', function(req,res,next){
             return;
         }
         if (user.validPassword(password)){
+            var balance_address = user.address;
             user_usable_balance = get_balance(balance_address,'available');
             user_current_balance = get_balance(balance_address,'actual');
                 res.json({
@@ -1063,7 +1067,8 @@ function get_block(blockId) {
 };
 
 
-function sync_block(req, res, next) {
+
+router.get('/sync-block/:blockId', function(req, res, next) {
     try {
         var blockId = req.params.blockId;
         var isInitAction = req.query.init ? true : false;
@@ -1083,7 +1088,7 @@ function sync_block(req, res, next) {
             message: e.message
         });
     }
-};
+});
 
 function get_all_remote_trans(req, res, next) {
     try {
