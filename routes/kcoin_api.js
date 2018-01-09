@@ -1,8 +1,8 @@
 var express = require('express');
 var router = express.Router();
 var User = require('../model/user');
-var Balance = require('../model/balance');
 var Transaction = require('../model/transaction');
+var request = require('request');
 var ursa = require('ursa');
 var crypto = require('crypto');
 var randomstring = require('randomstring');
@@ -46,9 +46,10 @@ function createAddress(res, user)
     user_instance.privateKey = JSON.parse(body).privateKey;
     User.findByIdAndUpdate(user._id,user_instance,{}).exec(function (err, newUser) {
         if (err){
-            res.json({success: false, msg: 'Create address error!'});
+            res.json({
+                status: 0,
+                message: 'Failed to update address'});
         }
-
     });
     } else {
         res.json({
@@ -68,13 +69,12 @@ router.post('/register', function(req,res,next){
         if (data){
             res.json({
                 status: 0,
-                message: 'Email is already in use'
+                message: 'Email is already in use!'
             });
             return;
         }
         if (!data){
             var newUser = new User();
-            var newBalance = new Balance();
             var private_key = ursa.generatePrivateKey(1024, 65537);
             var public_key = private_key.toPublicPem();
             
@@ -82,23 +82,13 @@ router.post('/register', function(req,res,next){
             newUser.email = email;
             newUser.password = newUser.encryptPassword(password);
             newUser.is_active=0;
-            newUser.balance_id = newBalance._id;
-            newBalance.real_balance = 0;
-            newBalance.usable_balance = 0;
             createAddress(res,newUser);
-            newBalance.save(function(error,newbalance){
-            if(error){
-                res.json({
-                    status: 0,
-                    message: 'Register failed'
-                });
-            }
             newUser.save(function(error, result){
                 console.log(result);
                 if(error){
                     res.json({
                         status: 0,
-                        message: 'Register failed'
+                        message: 'Register failed!'
                     });
                     return;
                 }
@@ -115,26 +105,27 @@ router.post('/register', function(req,res,next){
                 if (error) {
                     res.json({
                         status: 0,
-                        message: 'Send email failed'
+                        message: 'Send email failed!'
                     });
                     return;
                 }
                 res.json({
                     status: 1,
-                    message: 'Register success'
+                    message: 'Register success!'
                 });
             });
         });
-    });
+
         }
     });
     
 });
 router.post('/user-dashboard',function(req,res,next){
-    var balance_address = req.body.balance_address;
+    var balance_address = req.body.address;
     var user_usable_balance = 0;
     var user_current_balance = 0;
-    Balance.findOne({address: balance_address},function(error,data){
+
+    User.findOne({address: balance_address},function(error,data){
         if (error){
             res.json({
                 status: 0,
@@ -142,21 +133,13 @@ router.post('/user-dashboard',function(req,res,next){
             });
             
         }
-      user_usable_balance = data.usable_balance;
-      user_current_balance = data.real_balance;
-      User.findOne({balance_id:data._id},function(error,user){
-        if (error){
-            res.json({
-                status: 0,
-                message: 'Get user fail'
-            });
-            
-        }
+      user_usable_balance = GetBalance(balance_address,'available');
+      user_current_balance = GetBalance(balance_address,'actual');
         res.json({
             status: 1,
             message: 'Get data success',
             data: {
-                name: user.name,
+                name: data.name,
                 address: data.address,
                 usable_balance : user_usable_balance,
                 current_balance : user_current_balance
@@ -361,18 +344,6 @@ router.post('/create-transaction', function(req,res,next){
                     });
                     return;
                 }
-                if (!local_address){
-                    var server_balance = getserverbalance();
-                    if (server_balance < amount){
-                        res.json({
-                            status: 0,
-                            message: 'Service not available.'
-                        });
-                        return;
-                    }
-                }
-
-
                 var newTransaction = new Transaction();
                 if (!newTransaction) {
                     res.json({
@@ -382,11 +353,12 @@ router.post('/create-transaction', function(req,res,next){
                     return;
                 }
                 var current_time =  new Date();
-                newTransaction.send_address = send_addressl;
+                newTransaction.is_local = true;
+                newTransaction.send_address = send_address;
                 newTransaction.receive_address = receive_address;
                 newTransaction.amount = amount;
                 newTransaction.remaining_amount = amount;
-                newTransaction.status = 'check';
+                newTransaction.status = 'unconfirmed';
                 newTransaction.created_at = current_time.toString();
                 
                 res.json({
