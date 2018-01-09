@@ -13,6 +13,19 @@ router.get('/',function(req, res, next) {
         message: 'Welcome to KCoin Management API',
     });
 });
+function post_request (url, data) {
+ 
+        let options = {
+            uri: url,
+            method: 'POST',
+            json: data
+        };
+        request(options, function (error, response, body) {
+            return(body);
+        });
+
+};
+
 
 function Hash(data) {
     var hash = crypto.createHash('sha256');
@@ -120,6 +133,61 @@ router.post('/register', function(req,res,next){
     });
     
 });
+
+
+function get_l_trans (address, sort = null, offset = 0, limit = 10) {
+        let query = LocalTransaction.find({
+            $or: [
+                {src_addr: address},
+                {
+                    $and: [
+                        {dst_addr: address},
+                        {status: {'$ne': 'init'}}
+                    ]
+                }
+            ],
+            status: {$ne: 'invalid' }
+        }).skip(offset).limit(limit);
+
+        if (sort) {
+            query = query.sort({created_at: 'descending'});
+        }
+
+        query.exec(function (error, transactions) {
+            if (!transactions) {
+                resolve([]);
+                return;
+            }
+            return(transactions);
+        })
+}
+
+
+function get_balance(address, type = 'available') {
+    var transactions  = get_l_trans(address);
+    var receivedAmount = 0;
+    var sentAmount    = 0;
+    for (var index in transactions) {
+        var transaction = transactions[index];
+
+        if (transaction.status === 'invalid' || transaction.status === 'init')
+            continue;
+
+        if (type === 'actual' && transaction.status !== 'done')
+            continue;
+
+        if (transaction.src_addr === address) {
+            sentAmount += transaction.amount;
+        }
+        else if (transaction.dst_addr === address) {
+            receivedAmount += transaction.amount;
+        }
+    }
+
+    return receivedAmount - sentAmount;
+};
+
+
 router.post('/user-dashboard',function(req,res,next){
     var balance_address = req.body.address;
     var user_usable_balance = 0;
@@ -133,8 +201,8 @@ router.post('/user-dashboard',function(req,res,next){
             });
             
         }
-      user_usable_balance = GetBalance(balance_address,'available');
-      user_current_balance = GetBalance(balance_address,'actual');
+      user_usable_balance = get_balance(balance_address,'available');
+      user_current_balance = get_balance(balance_address,'actual');
         res.json({
             status: 1,
             message: 'Get data success',
@@ -179,6 +247,8 @@ router.get('/active/:id', function(req,res,next){
  
      });
 });
+
+
 router.post('/signin', function(req,res,next){
     var email    = req.body.email;
     var password = req.body.password;
@@ -198,8 +268,8 @@ router.post('/signin', function(req,res,next){
             return;
         }
         if (user.validPassword(password)){
-            user_usable_balance = GetBalance(balance_address,'available');
-            user_current_balance = GetBalance(balance_address,'actual');
+            user_usable_balance = get_balance(balance_address,'available');
+            user_current_balance = get_balance(balance_address,'actual');
                 res.json({
                     status: 1,
                     message: 'Login success',      
@@ -293,45 +363,83 @@ function getserverbalance(){
         }
         return balance;
     })
-    
 
 }
+function get_free_trans() {
+    return new Promise(resolve => {
+        Transaction.find({is_local:false,status: 'available'}, function (error, transactions) {
+            if (!transactions){
+                resolve([]);
+                return;
+            }
+            resolve(transactions);
+        })
+    });
+}
+function GetAllPendingTransaction() {
+        return new Promise(resolve => {
+            Transaction.findOne({is_local:true,status: 'pending'}, function (error, tx) {
+                resolve(tx);
+            });
+        });
+    }
+function get_actual_server_balance () {
+    var freeRemoteTransactions = get_free_trans();
+    var balance = 0;
+    for (var index in freeRemoteTransactions){
+        var freeRemoteTransaction = freeRemoteTransactions[index];
+        balance += freeRemoteTransaction.amount;
+    }
+
+    return balance;
+};
+
+function get_remote_trans () {
+    return new Promise(resolve => {
+        Transaction.find({is_local:false}, function (error, transactions) {
+            if (error){
+                resolve([]);
+                return;
+            }
+            resolve(transactions);
+        })
+    });
+};
+
+
 router.post('/create-transaction', function(req,res,next){
     var send_address = req.body.send_address;
     var receive_address = req.body.receive_address;
     var amount     = req.body.amount;
-    var user_id = req.body.user_id;
+
     if (!send_address || !receive_address) {
         res.json({
             status: 0,
             message: 'Missing data'
         });
-        
+        return;
     }
-    User.findById(user_id,function(error,user){
-        if (error){
+    var balance = get_balance(send_address, 'available');
+    if (balance < amount){
+        res.json({
+            status: 0,
+            message: 'Not enough balance'
+        });
+        return;
+    }
+    var user = get_user_by_address(send_address);
+    if (!user) { // is send money to external transaction
+        var availableBalance = get_actual_server_balance();
+        if (availableBalance < amount){
             res.json({
                 status: 0,
-                message: 'User not found'
+                message: 'Server busy... please try after 10 minutes!'
             });
-           
+            return;
         }
-        Balance.findById(req.user.balance_id,function(error,data){
-            if (error){
-                res.json({
-                    status: 0,
-                    message: 'Get user balance fail'
-                });
-                return;
-            }
-            if (data.usable_balance < amount){
-                res.json({
-                    status: 0,
-                    message: 'Not enough money'
-                });
-                return;
-            }
-            var check = Balance.find({address:receive_address},function(error,local_address){
+    }
+    if (user){
+            var check = User.find({address:receive_address},function(error,local_address){
                 if (error){
                     res.json({
                         status: 0,
@@ -362,13 +470,202 @@ router.post('/create-transaction', function(req,res,next){
                     data: {
                         transaction_id: newTransaction._id
                     }
-
+                    
                 });
                 return;
-            });
         });
-    });   
-});
+
+        }
+}); 
+
+
+function get_trans_by_id (id) {
+    return new Promise(resolve => {
+        Transaction.findById(id, function (error, tx) {
+            resolve(tx);
+        });
+    });
+};
+
+
+
+function update_trans(localTx) {
+    return new Promise(resolve => {
+        localTx.save(function (err, tx) {
+            resolve(tx);
+        });
+    });
+}
+
+function sign_trans_req (inputs, outputs) {
+    // Generate transactions
+    let bountyTransaction = {
+        version: 1,
+        inputs: [],
+        outputs: []
+    };
+
+    let keys = [];
+
+    inputs.forEach(input => {
+        bountyTransaction.inputs.push({
+            referencedOutputHash: input.source.referencedOutputHash,
+            referencedOutputIndex: input.source.referencedOutputIndex,
+            unlockScript: ''
+        });
+        keys.push(input.key);
+    });
+
+    // Output to all destination 10000 each
+    outputs.forEach(output => {
+        bountyTransaction.outputs.push({
+            value: output.value,
+            lockScript: 'ADD ' + output.address
+        });
+    });
+
+    // Sign
+    SignTransaction(bountyTransaction, keys);
+
+    return bountyTransaction;
+}
+
+function update_r_trans(remoteTx) {
+    return new Promise(resolve => {
+        remoteTx.save(function (err, tx) {
+            resolve(tx);
+        });
+    });
+}
+
+
+function build_trans_req(transactionId, srcAddress, dstAddress, amount) {
+    let freeTransactions = get_free_trans();
+    let useResources = [];
+    let remainingAmount = amount;
+    for (let index in freeTransactions) {
+        let freeTransaction = freeTransactions[index];
+        useResources.push(freeTransaction);
+
+        freeTransaction.status = 'confirmed';
+        freeTransaction.used_for = transactionId;
+        let updatedTransaction = update_r_trans(freeTransaction);
+
+        remainingAmount -= freeTransaction.amount;
+        if (remainingAmount <= 0)
+            break;
+    }
+
+    let outputs = [
+        {
+            address: dstAddress,
+            value: amount
+        }
+    ];
+
+    if (remainingAmount < 0) {
+        outputs.push({
+            address: srcAddress,
+            value: -remainingAmount
+        });
+    }
+
+    let inputs = [];
+    for (let index in useResources) {
+        let resource = useResources[index];
+        let address = resource.dst_addr;
+
+        let user = get_user_by_address(address);
+        let key = {
+            privateKey: user.private_key,
+            publicKey: user.public_key,
+        };
+
+        let source = {
+            referencedOutputHash: resource.src_hash,
+            referencedOutputIndex: resource.index
+        };
+
+        inputs.push({source, key});
+    }
+
+    return {inputs, outputs}
+}
+
+function send_trans_req (transactionId, srcAddress, dstAddress, amount) {
+    let requestData = build_trans_req(transactionId, srcAddress, dstAddress, amount);
+    let signedRequest = sign_trans_req(requestData.inputs, requestData.outputs);
+
+    console.log(signedRequest);
+
+    let url = 'https://api.kcoin.club/transactions';
+    let requestResult = post_request(url, signedRequest);
+    console.log(requestResult);
+    if (requestResult.code === 'InvalidContent') {
+        return false;
+    }
+    return true;
+};
+
+
+function confirm_trans (user, req, res, next) {
+    try {
+        var transactionId = req.body.transaction_id;
+
+        var transaction = Transaction.findById(transactionId,function(error,transaction){
+
+       
+        if (!transaction) {
+            res.json({
+                status: 0,
+                message: 'Transaction not found!'
+            });
+            return;
+        }
+
+        var dstAddress = transaction.receive_address;
+        var srcAddress = transaction.send_address;
+        var amount     = transaction.amount;
+        var user = get_user_by_address(dstAddress);
+
+        if (!user) { // send money to external system
+            transaction.remaining_amount = transaction.amount;
+            transaction.status = 'pending';
+
+            var sendRequestResult = send_trans_req(srcAddress, dstAddress, amount);
+            if (!sendRequestResult) {
+                res.json({
+                    status: 0,
+                    message: 'Failed to send create transaction request'
+                })
+            }
+        }
+        else {
+            transaction.remaining_amount = 0;
+            transaction.status = 'confimed'
+        }
+ });
+        transaction = update_trans(transaction);
+        if (!transaction){
+            res.json({
+                status: 0,
+                message: 'Unknown error'
+            });
+            return;
+        }
+
+        res.json({
+            status: 1,
+            message: 'Your new transaction has been confirmed successfully.'
+        });
+    }
+    catch (e) {
+        res.json({
+            status: 0,
+            message: e.message
+        });
+    }
+};
 function get_user_by_id(user_id){
     User.findById(user_id,function(error,user){
         if(error){
@@ -377,6 +674,39 @@ function get_user_by_id(user_id){
        return user;
     });
 }
+function delete_l_trans (transactionId) {
+    return new Promise(resolve => {
+        Transaction.find({_id: transactionId,is_local:true}).remove(function (err) {
+            resolve(!err);
+        });
+    });
+};
+function delete_trans  (user, req, res, next) {
+    try {
+        var transactionId = req.params.transactionId;
+        var deleteResult = delete_l_trans(transactionId);
+        if (!deleteResult) {
+            res.json({
+                status: 0,
+                message: 'Unknown error!'
+            });
+            return
+        }
+
+        res.json({
+            status: 1,
+            message: 'Transaction has been deleted.'
+        });
+    }
+    catch (e) {
+        res.json({
+            status: 0,
+            message: e.message
+        });
+    }
+};
+
+
 function ToBinary(transaction, withoutUnlockScript){
     var version = Buffer.alloc(4);
     version.writeUInt32BE(transaction.version);
@@ -528,7 +858,7 @@ function send_trans_request(user_id,send_address, receive_address, amount){
         }
 
         var requestData = {inputs, outputs};
-        var signedRequest = SignTransactionRequest(requestData.inputs, requestData.outputs);
+        var signedRequest = sign_trans_req(requestData.inputs, requestData.outputs);
     
         console.log(signedRequest);
     
@@ -719,4 +1049,77 @@ router.get('/sync-latest-blocks', function (req, res, next){
         
 });
 
+
+function get_block(blockId) {
+    var url = 'https://api.kcoin.club/' + `blocks/${blockId}`;
+    var options = {
+        uri: url,
+        method: 'GET',
+        json: true
+    };
+    request(options, function (error, response, body) {
+        return body;
+    });
+};
+
+
+function sync_block(req, res, next) {
+    try {
+        var blockId = req.params.blockId;
+        var isInitAction = req.query.init ? true : false;
+
+        block = get_block(blockId);
+        var transactions = block.transactions;
+        TransactionService.SyncTransactions(transactions, isInitAction);
+        res.json({
+            status: 1,
+            message: 'Synced successfully',
+            data: transactions
+        });
+    }
+    catch (e) {
+        res.json({
+            status: 0,
+            message: e.message
+        });
+    }
+};
+
+function get_all_remote_trans(req, res, next) {
+    try {
+        var remoteTransactions = get_remote_trans();
+        var userList = {};
+        var data = [];
+        for (var index in remoteTransactions) {
+            var transaction = remoteTransactions[index];
+            var dstAddr = transaction.dst_addr;
+
+            if (!userList[dstAddr]){
+                var user = get_user_by_address(dstAddr);
+                userList[receive_address] = user;
+            }
+
+            data.push({
+                hash: transaction.src_hash,
+                index: transaction.index,
+                dst_addr: transaction.dst_addr,
+                dst_email: userList[dstAddr] ? userList[dstAddr].email : null,
+                amount: transaction.amount,
+                status: transaction.status
+            });
+        }
+
+        res.json({
+            status: 1,
+            message: 'Got data successfully',
+            data
+        });
+    }
+    catch (e) {
+        res.json({
+            status: 0,
+            message: e.message
+        });
+    }
+};
 module.exports = router;

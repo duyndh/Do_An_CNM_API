@@ -9,6 +9,7 @@ var TransactionSchema = new mongoose.Schema(
         receive_address: {type: String, required: true},
         amount: {type: Number, required: true},
         remaining_amount: {type: Number},
+        reason:{type:String},
         status: {type: String},
         created_at: {type: String}    
     }
