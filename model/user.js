@@ -11,7 +11,9 @@ var userSchema = new mongoose.Schema(
   		password:{type:String},
         is_active:{type:Boolean},
         is_admin:{type:Boolean,default:false},
-        balance_id:{type:Schema.Types.ObjectId}
+        address:{type: String},
+        private_key:{type: String},
+        public_key:{type: String}
 });
 
 userSchema.methods.encryptPassword = function(password){
