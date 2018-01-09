@@ -147,9 +147,9 @@ router.post('/user-dashboard',function(req,res,next){
       });
      
     });
-    
-    });
 });
+
+
 router.get('/active/:id', function(req,res,next){
     User.findOne({_id:req.params.id},function (err,user) {
         if (err) {
