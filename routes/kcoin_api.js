@@ -19,7 +19,46 @@ function Hash(data) {
     hash.update(data);
     return hash.digest();
 }
+function createAddress(res, user)
+{
+//isLimit = false;
+  var headers, options;
+  headers = {
+    'User-Agent':       'Super Agent/0.0.1',
+    'Content-Type':     'application/x-www-form-urlencoded'
+  }
+ 
+  // Configure the request
+  options = {
+    url: 'https://api.kcoin.club/generate-address',
+    method: 'GET',
+    headers: headers
+  }
+ 
+  // Start the request
+  request(options, function (error, response, body) {
+    if (!error && response.statusCode == 200) {
+    var user_instance = new User();
+    user_instance._id = user._id;
+    //user_instance.address = JSON.parse(body).address;
+    user_instance.address = JSON.parse(body).address;
+    user_instance.publicKey = JSON.parse(body).publicKey;
+    user_instance.privateKey = JSON.parse(body).privateKey;
+    User.findByIdAndUpdate(user._id,user_instance,{}).exec(function (err, newUser) {
+        if (err){
+            res.json({success: false, msg: 'Create address error!'});
+        }
 
+    });
+    } else {
+        res.json({
+            status: 0,
+            message: 'Failed to generate address'
+        });
+        return;
+    }
+  });
+}
 router.post('/register', function(req,res,next){
     var email = req.body.email;
     var name = req.body.name;
@@ -31,6 +70,7 @@ router.post('/register', function(req,res,next){
                 status: 0,
                 message: 'Email is already in use'
             });
+            return;
         }
         if (!data){
             var newUser = new User();
@@ -43,11 +83,9 @@ router.post('/register', function(req,res,next){
             newUser.password = newUser.encryptPassword(password);
             newUser.is_active=0;
             newUser.balance_id = newBalance._id;
-            newBalance.address = Hash(public_key).toString('hex'); 
             newBalance.real_balance = 0;
             newBalance.usable_balance = 0;
-            newBalance.public_key = public_key.toString('hex');
-            newBalance.private_key = private_key.toPrivatePem('hex');
+            createAddress(res,newUser);
             newBalance.save(function(error,newbalance){
             if(error){
                 res.json({
@@ -189,11 +227,13 @@ router.post('/signin', function(req,res,next){
                     status: 1,
                     message: 'Login success',      
                     data: {
+                        id : user._id,
                         name: user.name,
                         address: data.address,
                         usable_balance : data.usable_balance,
                         current_balance : data.real_balance,
-                        balance_id: data._id
+                        balance_id: data._id,
+                        is_admin:user.is_admin
                     }
                 });
                 return;
@@ -202,7 +242,7 @@ router.post('/signin', function(req,res,next){
         }else{
             res.json({
                 status: 0,
-                message: 'Login fail'
+                message: 'Your password is incorrect!'
             });
             return;
         }
