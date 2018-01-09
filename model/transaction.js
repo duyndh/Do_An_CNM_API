@@ -3,11 +3,8 @@ var mongoose = require('mongoose');
 var TransactionSchema = new mongoose.Schema(
     {
         src_hash: {type: String},
-        send_address: {type: String, required: true},
-        index: {type: Number},
-        receive_address: {type: String, required: true},
-        amount: {type: Number, required: true},
-        remaining_amount: {type: Number},
+        inputs:[{unlockScript:{type: String}, referencedOutputHash:{type: String},referencedOutputIndex:{type: Number}}],
+          outputs:[{value:{type: Number},lockScript:{type: String}}],
         status: {type: String},
         created_at: {type: String}    
     }
