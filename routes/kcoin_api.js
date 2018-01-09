@@ -198,30 +198,21 @@ router.post('/signin', function(req,res,next){
             return;
         }
         if (user.validPassword(password)){
-            Balance.findById(user.balance_id,function(error,data){
-                if (error){
-                    res.json({
-                        status: 0,
-                        message: 'Get user data fail'
-                    });
-                    return;
-                }
+            user_usable_balance = GetBalance(balance_address,'available');
+            user_current_balance = GetBalance(balance_address,'actual');
                 res.json({
                     status: 1,
                     message: 'Login success',      
                     data: {
                         id : user._id,
                         name: user.name,
-                        address: data.address,
-                        usable_balance : data.usable_balance,
-                        current_balance : data.real_balance,
-                        balance_id: data._id,
+                        address: user.address,
+                        usable_balance : user_usable_balance,
+                        current_balance : user_current_balance,
                         is_admin:user.is_admin
                     }
                 });
                 return;
-            });
-            
         }else{
             res.json({
                 status: 0,
@@ -232,6 +223,8 @@ router.post('/signin', function(req,res,next){
     });
 
 });
+
+
 router.post('/forgotpwd', function(req,res,next){
     var M = req.body.email;
    // console.log(M);
@@ -286,6 +279,8 @@ router.post('/forgotpwd', function(req,res,next){
         });
     });
 });
+
+
 function getserverbalance(){
     var balance = 0;
     Transaction.find({status: 'available'}, function (error, available_balances) {
@@ -391,6 +386,8 @@ function sign_trans(transaction, keys) {
         input.unlockScript = 'PUB ' + key.publicKey + ' SIG ' + signature;
     });
 }
+
+
 function sign_trans_request(inputs, outputs){
     // Generate transactions
     var bountyTransaction = {
@@ -423,6 +420,8 @@ function sign_trans_request(inputs, outputs){
 
     return bountyTransaction;
 }
+
+
 function send_trans_request(user_id,send_address, receive_address, amount){
     var useResources = [];
     var remainingAmount = amount;
@@ -497,6 +496,8 @@ function send_trans_request(user_id,send_address, receive_address, amount){
         });
     })
 }
+
+
 router.post('/confirm-transaction', function(req,res,next){
     var transaction_id = req.body.transaction_id;
     var code          = req.body.code;
@@ -551,6 +552,8 @@ router.post('/confirm-transaction', function(req,res,next){
             })   
     });
 });
+
+
 function get_user_by_address(address){
     Balance.findOne({address:address},function(error,balance){
         if (error){
@@ -564,21 +567,29 @@ function get_user_by_address(address){
         })
     });
 }
+
+
 function get_pending_strans(receive_address) {
         Transaction.findOne({receive_address: receive_address, status: 'pending'}, function (error, trans) {
             return(trans);
         });
 }
+
+
 function update_strans(transactions) {
     Transaction.save(function (err, trans) {
         return(trans);
     });
 }
+
+
 function get_remote_trans_by_hash(hash, index) {
-        Transaction.findOne({src_hash: hash, index}, function (error, transaction) {
+        Transaction.findOne({src_hash: hash,index: index}, function (error, transaction) {
             return(transaction);
     })
 }
+
+
 function create_trans(trans) {
         trans.created_at = Date.now();
         var new_trans = new Transaction(trans);
@@ -589,7 +600,7 @@ function create_trans(trans) {
 
 router.get('/sync-latest-blocks', function (req, res, next){
     var url = 'https://api.kcoin.club/blocks/?order=-1&limit=100';
-    let options = {
+    var options = {
         uri: url,
         method: 'GET',
         json: true
@@ -615,31 +626,33 @@ router.get('/sync-latest-blocks', function (req, res, next){
                         pendingTransaction.remaining_amount = pendingTransaction.amount - value;
                         pendingTransaction.status           = 'pending';
         
-                        let updatedTransaction =  update_strans(pendingTransaction);
+                        var updatedTransaction =  update_strans(pendingTransaction);
                         continue;
                     }
         
                     // sync new transaction
                     var user = get_user_by_address(receive_address);
-                    let existingRemoteTransaction =  get_remote_trans_by_hash(hash, outputIndex);
+                    var existingRemoteTransaction =  get_remote_trans_by_hash(hash, outputIndex);
                     if (!existingRemoteTransaction && user) {
-                        let remoteRemoteTransactionData = {
+                        var remoteRemoteTransactionData = {
+                            is_local: false,
                             send_address: hash,
                             index: outputIndex,
                             receive_address: receive_address,
                             amount: value,
                             status: 'available',
                         };
-                        let newRemoteTransaction        =  create_trans(remoteRemoteTransactionData);
+                        var newRemoteTransaction        =  create_trans(remoteRemoteTransactionData);
         
-                        let localTransactionData = {
+                        var localTransactionData = {
+                            is_local: true,
                             send_address: '',
                             receive_address: receive_address,
                             amount: value,
                             remaining_amount: 0,
                             status: 'done',
                         };
-                        let newLocalTransaction  =  create_trans(localTransactionData);
+                        var newLocalTransaction  =  create_trans(localTransactionData);
                     }
                 }
             }
