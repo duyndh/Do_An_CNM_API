@@ -10,6 +10,7 @@ var userSchema = new mongoose.Schema(
         email:{type: String},
   		password:{type:String},
         is_active:{type:Boolean},
+        is_admin:{type:Boolean,default:false},
         balance_id:{type:Schema.Types.ObjectId}
 });
 
