@@ -946,6 +946,8 @@ function send_trans_request(user_id,send_address, receive_address, amount){
 router.post('/confirm-transaction',async function(req,res,next){
     var transaction_id = req.body.transaction_id;
     var sender_address = req.body.send_address;
+    console.log(transaction_id);
+    console.log(sender_address);
     Transaction.findById(transaction_id,function(error,data){
         if (error){
             res.json({
@@ -961,6 +963,7 @@ router.post('/confirm-transaction',async function(req,res,next){
             });
             return;
         }
+        console.log(data);
         var receive_address = data.receive_address;
         var send_address = data.send_address;
         var amount     = data.amount;
@@ -983,7 +986,7 @@ router.post('/confirm-transaction',async function(req,res,next){
                 data.remaining_amount = 0;
                 data.status = 'unavailable'
             }
-            Transaction.save(function(error,transaction){
+            data.save(function(error,transaction){
                 if (!transaction){
                     res.json({
                         status: 0,
