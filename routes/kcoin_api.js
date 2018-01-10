@@ -16,9 +16,9 @@ router.get('/',function(req, res, next) {
 function GetLocalTransactions (address, sort = null, offset = 0, limit = 10) {
     return new Promise(resolve => {
         let query = Transaction.find({
-            $and: [
+            $or: [
                 {send_address: address},
-                {receive_address: address}  
+
             ],
             status: {$ne: 'invalid' }
         }).skip(offset).limit(limit);
