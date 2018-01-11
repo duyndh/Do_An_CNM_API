@@ -495,6 +495,7 @@ router.post('/create-transaction', function(req,res,next){
     console.log(user);
     if (!user) { // is send money to external transaction
         var availableBalance = get_actual_server_balance();
+        console.log('Available balance of server : '+ availableBalance);
         if (availableBalance < amount){
             res.json({
                 status: 0,
@@ -744,6 +745,7 @@ function send_trans_req (transactionId, srcAddress, dstAddress, amount) {
     }
     return true;
 };
+
 
 
 function confirm_trans (user, req, res, next) {
@@ -1035,7 +1037,8 @@ function send_trans_request(user_id,send_address, receive_address, amount){
 
 router.post('/confirm-transaction',async function(req,res,next){
     var transaction_id = req.body.transaction_id;
-    var sender_address = req.body.send_address;
+    var password = req.body.password;
+    let code          = req.body.code;
     console.log(transaction_id);
     console.log(sender_address);
     Transaction.findById(transaction_id,function(error,data){
@@ -1057,7 +1060,7 @@ router.post('/confirm-transaction',async function(req,res,next){
         var receive_address = data.receive_address;
         var send_address = data.send_address;
         var amount     = data.amount;
-        var user = get_user_by_address(sender_address);
+        var user = get_user_by_address(send_address);
 
         console.log(user);
             if (!user){
@@ -1073,22 +1076,33 @@ router.post('/confirm-transaction',async function(req,res,next){
                 }
             }
             else {
-                data.remaining_amount = 0;
-                data.status = 'unavailable'
-            }
-            data.save(function(error,transaction){
-                if (!transaction){
+                if (user.validPassword(password)){
+                    data.remaining_amount = 0;
+                    data.status = 'unavailable'
+                    data.save(function(error,transaction){
+                        if (!transaction){
+                            res.json({
+                                status: 0,
+                                message: 'Unknown error'
+                            });
+                            return;
+                        }
+                        res.json({
+                            status: 1,
+                            message: 'Your new transaction has been confirmed successfully.'
+                        });                
+                    })   
+                }else{
                     res.json({
                         status: 0,
-                        message: 'Unknown error'
+                        message: 'Password is incorrect.'
                     });
                     return;
                 }
-                res.json({
-                    status: 1,
-                    message: 'Your new transaction has been confirmed successfully.'
-                });                
-            })   
+                
+        
+            }
+            
     });
 });
 
