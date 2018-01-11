@@ -11,6 +11,7 @@ var TransactionSchema = new mongoose.Schema(
         remaining_amount: {type: Number},
         reason:{type:String},
         status: {type: String},
+        two_fa_code: {type: String},
         created_at: {type: String}    
     }
 );

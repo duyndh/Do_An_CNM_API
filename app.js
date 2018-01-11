@@ -19,9 +19,9 @@ var kcoin_api = require('./routes/kcoin_api');
 
 var app = express();
 // Connect to database
-// mongoose.connect('localhost:27017/project_cnm');
+mongoose.connect('localhost:27017/project_cnm');
 
-mongoose.connect('mongodb://root:root@ds237717.mlab.com:37717/project_cnm');
+// mongoose.connect('mongodb://root:root@ds237717.mlab.com:37717/project_cnm');
 var db = mongoose.connection;
 
 db.on("error", console.error.bind(console, "connection error"));

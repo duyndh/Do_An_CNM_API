@@ -13,12 +13,17 @@ router.get('/',function(req, res, next) {
         message: 'Welcome to KCoin Management API',
     });
 });
-function GetLocalTransactions (address, sort = null, offset = 0, limit = 10) {
+function get_l_trans (address, sort = null, offset = 0, limit = 10) {
     return new Promise(resolve => {
         let query = Transaction.find({
             $or: [
                 {send_address: address},
-
+                    {
+                        $and: [
+                            {receive_address: address},
+                            {status: 'confirmed'}
+                        ]
+                    }
             ],
             status: {$ne: 'invalid' }
         }).skip(offset).limit(limit);
@@ -43,7 +48,7 @@ router.post('/gettrans',async function (req, res, next) {
         let offset  = typeof req.query.offset !== 'undefined' ? req.query.offset : 0;
         let limit   = typeof req.query.limit !== 'undefined' ? req.query.limit : 10;
         // Transaction.find({address},)
-        let result  = await GetLocalTransactions(address, true, offset, limit);
+        let result  = await get_l_trans(address, true, offset, limit);
         console.log(result);
         res.json({
             status: 1,
@@ -527,6 +532,7 @@ router.post('/create-transaction', function(req,res,next){
                 newTransaction.save(function (err, tx) {
                     //resolve(tx);
                 });
+                SendCreateTransactionConfirmationEmail(newTransaction._id);
                 res.json({
                     status: 1,
                     message: 'New transaction created',
@@ -540,6 +546,75 @@ router.post('/create-transaction', function(req,res,next){
 
         }
 }); 
+
+Generate2FACode = function () {
+    let length = 6;
+    let str = "";
+    for ( ; str.length < length; str += Math.random().toString( 36 ).substr( 2 ) );
+    return str.substr( 0, length ).toUpperCase();
+};
+
+SendEmail = function (emailOption) {
+    return new Promise(resolve => {
+        email_transporter.sendMail(emailOption, function (error, info) {
+            if (error){
+                console.log(error);
+                resolve(false);
+            }
+            else {
+                resolve(true);
+            }
+        });
+    })
+  };
+
+SendCreateTransactionConfirmationEmail = async function (transactionId) {
+    try {
+        //let transactionId = req.params.transactionId;
+        let transaction = await get_trans_by_id(transactionId);
+        if (!transaction) {
+            res.json({
+                status: 0,
+                message: 'Transaction not found!'
+            });
+            return;
+        }
+
+        let twoFACode = Generate2FACode();
+        transaction.two_fa_code = twoFACode;
+        transaction = await update_trans(transaction);
+
+        let srcAddress = transaction.send_address;
+        let user = await get_user_by_address(srcAddress);
+        let email = user.email;
+
+        let mailOptions = {
+            from: `KCoin Management <duyychiha9@gmail.com>`,
+            to: email,
+            subject: 'KCoin - Confirm new transaction',
+            html: `You just send to <b>${Transaction.receive_address}</b> : <b>${Transaction.amount}</b><br>Your verification code is: <b>${twoFACode}</b><br>Click <a href="http://localhost:3000/user/user-confirm/${Transaction._id}">here</a> to confirm your transaction.`
+        };
+        let sendEmailResult = await SendEmail(mailOptions);
+        if (sendEmailResult) {
+            res.json({
+                status: 1,
+                message: 'A confirmation email has been sent.'
+            });
+        }
+        else {
+            res.json({
+                status: 0,
+                message: 'Unknown error!'
+            });
+        }
+    }
+    catch (e) {
+        res.json({
+            status: 0,
+            message: e.message
+        });
+    }
+};
 
 
 function get_trans_by_id (id) {
@@ -674,7 +749,7 @@ function send_trans_req (transactionId, srcAddress, dstAddress, amount) {
 function confirm_trans (user, req, res, next) {
     try {
         var transactionId = req.body.transaction_id;
-
+        let code          = req.body.code;
         var transaction = Transaction.findById(transactionId,function(error,transaction){
 
        
@@ -737,9 +812,25 @@ function get_user_by_id(user_id){
        return user;
     });
 }
-function delete_l_trans (transactionId) {
+router.post('/delete-transaction',async function(req,res,next){
+    let transaction_id = req.body.transaction_id;
+    let deleteResult = await delete_l_trans(transaction_id);
+    if (!deleteResult) {
+        res.json({
+            status: 0,
+            message: 'Unknown error!'
+        });
+        return
+    }
+    res.json({
+        status: 1,
+        message: 'Transaction has been deleted.'
+    });
+});
+
+function delete_l_trans (transaction_id) {
     return new Promise(resolve => {
-        Transaction.find({_id: transactionId,is_local:true}).remove(function (err) {
+        Transaction.find({_id: transaction_id,is_local:true}).remove(function (err) {
             resolve(!err);
         });
     });
@@ -941,7 +1032,6 @@ function send_trans_request(user_id,send_address, receive_address, amount){
         });
     })
 }
-
 
 router.post('/confirm-transaction',async function(req,res,next){
     var transaction_id = req.body.transaction_id;
