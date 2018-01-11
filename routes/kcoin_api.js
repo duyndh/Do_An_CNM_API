@@ -21,7 +21,7 @@ function get_l_trans (address, sort = null, offset = 0, limit = 10) {
                     {
                         $and: [
                             {receive_address: address},
-                            {status: 'confirmed'}
+                            {status: {$ne: 'init'}}
                         ]
                     }
             ],
@@ -190,36 +190,65 @@ router.post('/register', function(req,res,next){
     
 });
 
-function get_balance(address, type = 'available') {
-    return new Promise(resolve => {
-    var offset = 0;
-    var limit = 10
-    var sort = null;
-    let query = Transaction.find({
-        $or: [
-            {send_address: address},
-            {
-                $and: [
-                    {receive_address: address},
-                    {status: {'$ne': 'init'}}
-                ]
-            }
-        ],
-        status: {$ne: 'invalid' }
-    }).skip(offset).limit(limit);
-    if (sort) {
-        query = query.sort({created_at: 'descending'});
-    }
+// function GetBalance(address, type = 'available') {
+//     return new Promise(resolve => {
+//     var offset = 0;
+//     var limit = 10
+//     var sort = null;
+//     let query = Transaction.find({
+//         $or: [
+//             {send_address: address},
+//             {
+//                 $and: [
+//                     {receive_address: address},
+//                     {status: {'$ne': 'unconfirmed'}}
+//                 ]
+//             }
+//         ],
+//         status: {$ne: 'invalid' }
+//     }).skip(offset).limit(limit);
+//     if (sort) {
+//         query = query.sort({created_at: 'descending'});
+//     }
 
-    query.exec(function (error, transactions) {
-        if (!transactions) {
-            resolve([]);
-        }
-        //console.log(transactions);
-        var receivedAmount = 0;
-        var sentAmount    = 0;
-    for (var index in transactions) {
-        var transaction = transactions[index];
+//     query.exec(function (error, transactions) {
+//         if (!transactions) {
+//             resolve([]);
+//         }
+//         //console.log(transactions);
+//         var receivedAmount = 0;
+//         var sentAmount    = 0;
+//     for (var index in transactions) {
+//         var transaction = transactions[index];
+//         if (transaction.status === 'invalid' || transaction.status === 'unconfirmed')
+//             continue;
+
+//         if (type === 'actual' && transaction.status !== 'confirmed')
+//             continue;
+
+//         if (transaction.send_address === address) {
+//             sentAmount += transaction.amount;
+//         }
+//         else if (transaction.receive_address === address) {
+//             receivedAmount += transaction.amount;
+//         }
+//     }
+   
+//     var result = (receivedAmount - sentAmount);
+//     // console.log(result);
+//     resolve (result);
+//     })
+// });
+// };
+
+GetBalance = async function(address, type = 'available') {
+    let transactions  = await get_l_trans(address);
+    let receivedAmount = 0;
+    let sentAmount    = 0;
+    console.log('get local trans balance: '+transactions);
+    for (let index in transactions) {
+        let transaction = transactions[index];
+
         if (transaction.status === 'invalid' || transaction.status === 'init')
             continue;
 
@@ -233,12 +262,8 @@ function get_balance(address, type = 'available') {
             receivedAmount += transaction.amount;
         }
     }
-   
-    var result = (receivedAmount - sentAmount);
-    // console.log(result);
-    resolve (result);
-    })
-});
+
+    return receivedAmount - sentAmount;
 };
 
 router.post('/user-dashboard', async function(req,res,next){
@@ -246,14 +271,14 @@ router.post('/user-dashboard', async function(req,res,next){
     var user_usable_balance = 0;
     var user_current_balance = 0;
     console.log(balance_address);
-    user_usable_balance = await get_balance(balance_address,'available');
+    user_usable_balance = await GetBalance(balance_address,'available');
 
-    user_current_balance = await get_balance(balance_address,'actual');
+    user_current_balance = await GetBalance(balance_address,'actual');
     
-    if (user_current_balance < user_usable_balance)
-    {
-        user_current_balance = user_usable_balance;
-    }
+    // if (user_current_balance < user_usable_balance)
+    // {
+    //     user_current_balance = user_usable_balance;
+    // }
     
     User.findOne({address: balance_address},function(error,data){
         if (error){
@@ -314,6 +339,8 @@ router.get('/active/:id', function(req,res,next){
 router.post('/signin', function(req,res,next){
     var email    = req.body.email;
     var password = req.body.password;
+    console.log(email);
+    console.log(password);
     User.findOne({email: email}, function (error, user) {
 
         if (!user) {
@@ -332,8 +359,8 @@ router.post('/signin', function(req,res,next){
         }
         if (user.validPassword(password)){
             var balance_address = user.address;
-            user_usable_balance = get_balance(balance_address,'available');
-            user_current_balance = get_balance(balance_address,'actual');
+            user_usable_balance = GetBalance(balance_address,'available');
+            user_current_balance = GetBalance(balance_address,'actual');
                 res.json({
                     status: 1,
                     message: 'Login success',      
@@ -429,9 +456,9 @@ function getserverbalance(){
     })
 
 }
-function get_free_trans() {
+function get_free_remote_trans() {
     return new Promise(resolve => {
-        Transaction.find({is_local:false,status: 'available'}, function (error, transactions) {
+        Transaction.find({is_local:false,status: 'free'}, function (error, transactions) {
             if (!transactions){
                 resolve([]);
                 return;
@@ -447,9 +474,10 @@ function GetAllPendingTransaction() {
             });
         });
     }
-function get_actual_server_balance () {
-    var freeRemoteTransactions = get_free_trans();
+async function get_actual_server_balance () {
+    var freeRemoteTransactions = await get_free_remote_trans();
     var balance = 0;
+    console.log(freeRemoteTransactions);
     for (var index in freeRemoteTransactions){
         var freeRemoteTransaction = freeRemoteTransactions[index];
         balance += freeRemoteTransaction.amount;
@@ -471,7 +499,7 @@ function get_remote_trans () {
 };
 
 
-router.post('/create-transaction', function(req,res,next){
+router.post('/create-transaction',async function(req,res,next){
     var send_address = req.body.send_address;
     var receive_address = req.body.receive_address;
     var amount     = req.body.amount;
@@ -483,7 +511,7 @@ router.post('/create-transaction', function(req,res,next){
         });
         return;
     }
-    var balance = get_balance(send_address, 'available');
+    var balance = GetBalance(send_address, 'available');
     if (balance < amount){
         res.json({
             status: 0,
@@ -494,7 +522,7 @@ router.post('/create-transaction', function(req,res,next){
     var user = get_user_by_address(send_address);
     console.log(user);
     if (!user) { // is send money to external transaction
-        var availableBalance = get_actual_server_balance();
+        var availableBalance = await get_actual_server_balance();
         console.log('Available balance of server : '+ availableBalance);
         if (availableBalance < amount){
             res.json({
@@ -527,7 +555,7 @@ router.post('/create-transaction', function(req,res,next){
                 newTransaction.receive_address = receive_address;
                 newTransaction.amount = amount;
                 newTransaction.remaining_amount = amount;
-                newTransaction.status = 'unconfirmed';
+                newTransaction.status = 'init';
                 newTransaction.created_at = current_time.toString();
                 console.log(newTransaction);
                 newTransaction.save(function (err, tx) {
@@ -679,15 +707,15 @@ function update_r_trans(remoteTx) {
 
 
 function build_trans_req(transactionId, srcAddress, dstAddress, amount) {
-    let freeTransactions = get_free_trans();
+    let freeTransactions = get_free_remote_trans();
     let useResources = [];
     let remainingAmount = amount;
     for (let index in freeTransactions) {
         let freeTransaction = freeTransactions[index];
         useResources.push(freeTransaction);
 
-        freeTransaction.status = 'confirmed';
-        freeTransaction.used_for = transactionId;
+        freeTransaction.status = 'used';
+        freeTransaction.reason = transactionId;
         let updatedTransaction = update_r_trans(freeTransaction);
 
         remainingAmount -= freeTransaction.amount;
@@ -806,14 +834,13 @@ function confirm_trans (user, req, res, next) {
         });
     }
 };
-function get_user_by_id(user_id){
-    User.findById(user_id,function(error,user){
-        if(error){
-            return ;
-        }
-       return user;
+get_user_by_id = function (id) {
+    return new Promise(resolve => {
+        User.findById(id, function (error, user) {
+            resolve(user);
+        });
     });
-}
+};
 router.post('/delete-transaction',async function(req,res,next){
     let transaction_id = req.body.transaction_id;
     let deleteResult = await delete_l_trans(transaction_id);
@@ -1056,6 +1083,14 @@ router.post('/confirm-transaction',async function(req,res,next){
             });
             return;
         }
+        if (data.two_fa_code != code){
+            res.json({
+                status: 0,
+                message: 'Invalid code!'
+            });
+            return;
+        }
+
         console.log(data);
         var receive_address = data.receive_address;
         var send_address = data.send_address;
@@ -1078,7 +1113,7 @@ router.post('/confirm-transaction',async function(req,res,next){
             else {
                 if (user.validPassword(password)){
                     data.remaining_amount = 0;
-                    data.status = 'unavailable'
+                    data.status = 'done'
                     data.save(function(error,transaction){
                         if (!transaction){
                             res.json({
@@ -1116,13 +1151,6 @@ function get_user_by_address(address){
 }
 
 
-function get_pending_strans(receive_address) {
-        Transaction.findOne({receive_address: receive_address, status: 'pending'}, function (error, trans) {
-            return(trans);
-        });
-}
-
-
 function update_strans(transactions) {
     Transaction.save(function (err, trans) {
         return(trans);
@@ -1136,61 +1164,77 @@ function get_remote_trans_by_hash(hash, index) {
     })
 }
 
-
-function create_trans(trans) {
-        trans.created_at = Date.now();
-        var new_trans = new Transaction(trans);
-        new_trans.save(function (err, tx) {
-            return(tx);
+function CreateRemoteTransaction(newRemoteTx) {
+    return new Promise(resolve => {
+        newRemoteTx.created_at = Date.now();
+        newRemoteTx.is_local = false;
+        let newObj = new Transaction(newRemoteTx);
+        newObj.save(function (err, tx) {
+            resolve(tx);
         });
+    });
 }
 
-function sync_trans(transactions, isInitAction) {
-    for (var index in transactions) {
-        var transaction = transactions[index];
-        var outputs = transaction.outputs;
-        var hash = transaction.hash;
-        //console.log(outputs);
-        for (var outputIndex in outputs) {
-            var output = outputs[outputIndex];
-            
-            var value = output.value;
-            var lockScript = output.lockScript;
-            
-            var receive_address = lockScript.split(" ")[1];
-            var pendingTransaction =  get_remote_trans_by_hash(receive_address, value);
+function CreateLocalTransaction(newLocalTx) {
+    return new Promise(resolve => {
+        newLocalTx.created_at = Date.now();
+        newLocalTx.is_local = true;
+        let newObj = new Transaction(newLocalTx);
+        newObj.save(function (err, tx) {
+            resolve(tx);
+        });
+    });
+}
+
+sync_trans = async function (transactions, isInitAction = false) {
+    for (let index in transactions) {
+        let transaction = transactions[index];
+        let outputs = transaction.outputs;
+        let hash = transaction.hash;
+        let isReceiveRefund = false;
+        for (let outputIndex in outputs) {
+            let output = outputs[outputIndex];
+            let value = output.value;
+            let lockScript = output.lockScript;
+            let dstAddress = lockScript.split(" ")[1];
+
+            // confirm pending transaction
+            let pendingTransaction = await GetPendingTransactionByDstAddress(dstAddress, value);
             if (pendingTransaction) {
-                pendingTransaction.remaining_amount = pendingTransaction.amount - value;
-                pendingTransaction.status           = 'pending';
-                var updatedTransaction =  update_strans(pendingTransaction);
+                pendingTransaction.remaining_amount = 0;
+                pendingTransaction.status           = 'done';
+
+                let updatedTransaction = await update_trans(pendingTransaction);
+                isReceiveRefund = true;
                 continue;
             }
-            
-            //console.log(receive_address);
-            var user = get_user_by_address(receive_address);
-            console.log(user);
 
-            var existingRemoteTransaction =  get_remote_trans_by_hash(hash, outputIndex);
+            // sync new transaction
+            let user = await get_user_by_address(dstAddress);
+            console.log('user:'+ user);
+            let existingRemoteTransaction = await get_remote_trans_by_hash(hash, outputIndex);
+            console.log('remote trans:'+ existingRemoteTransaction);
             if (!existingRemoteTransaction && user) {
-                var remoteRemoteTransactionData = {
-                    is_local: false,
-                    send_address: hash,
+                let remoteRemoteTransactionData = {
+                    src_hash: hash,
                     index: outputIndex,
-                    receive_address: receive_address,
+                    receive_address: dstAddress,
                     amount: value,
-                    status: 'available',
+                    status: 'free',
                 };
-                var newRemoteTransaction        =  create_trans(remoteRemoteTransactionData);
-                console.log(newRemoteTransaction);
-                var localTransactionData = {
-                    is_local: true,
+                let newRemoteTransaction        = await CreateRemoteTransaction(remoteRemoteTransactionData);
+
+                if (isReceiveRefund)
+                    continue;
+
+                let localTransactionData = {
                     send_address: '',
-                    receive_address: receive_address,
+                    receive_address: dstAddress,
                     amount: value,
                     remaining_amount: 0,
                     status: 'done',
                 };
-                var newLocalTransaction  =  create_trans(localTransactionData);
+                let newLocalTransaction  = await CreateLocalTransaction(localTransactionData);
             }
         }
     }
@@ -1238,7 +1282,7 @@ router.get('/sync-latest-blocks', function (req, res, next){
                             amount: value,
                             status: 'available',
                         };
-                        var newRemoteTransaction        =  create_trans(remoteRemoteTransactionData);
+                        var newRemoteTransaction        =  CreateRemoteTransaction(remoteRemoteTransactionData);
                         console.log(newRemoteTransaction);
                         var localTransactionData = {
                             is_local: true,
@@ -1248,7 +1292,7 @@ router.get('/sync-latest-blocks', function (req, res, next){
                             remaining_amount: 0,
                             status: 'done',
                         };
-                        var newLocalTransaction  =  create_trans(localTransactionData);
+                        var newLocalTransaction  =  CreateLocalTransaction(localTransactionData);
                     }
                 }
             }
@@ -1334,4 +1378,229 @@ function get_all_remote_trans(req, res, next) {
         });
     }
 };
+
+function GetAllPendingTransaction() {
+    return new Promise(resolve => {
+        Transaction.findOne({is_local:true,status: 'pending'}, function (error, tx) {
+            resolve(tx);
+        });
+    });
+}
+
+function GetRemoteTransactionByHashIndex(hash, index) {
+    return new Promise(resolve => {
+        Transaction.findOne({is_local:false,src_hash: hash, index}, function (error, transaction) {
+            resolve(transaction);
+        })
+    });
+}
+function GetPendingTransactionByDstAddress(dstAddress, amount) {
+    return new Promise(resolve => {
+        Transaction.findOne({is_local:true,receive_address: dstAddress, status: 'pending', amount}, function (error, tx) {
+            resolve(tx);
+        });
+    });
+}
+
+
+function get_pending_strans() {
+    return new Promise(resolve => {
+        Transaction.findOne({is_local:true,status: 'pending'}, function (error, tx) {
+            resolve(tx);
+        });
+    });
+}
+
+function get_source_trans(transactionId) {
+    return new Promise(resolve => {
+        Transaction.find({is_local:false,reason: transactionId}, function (error, transactions) {
+            if (error) {
+                resolve([]);
+                return;
+            }
+            resolve(transactions);
+        })
+    });
+}
+
+
+get_server_pending = async function () {
+    let pendingAmount = 0;
+    let pendingTransactions = await get_pending_strans();
+
+    for (let index in pendingTransactions) {
+        let local = pendingTransactions[index];
+
+        let sources = await get_source_trans(local._id);
+        let sourceAmount = 0;
+        for (let sourceIndex in sources) {
+            let source = sources[sourceIndex];
+            sourceAmount += source.amount;
+        }
+        pendingAmount += sourceAmount - local.amount;
+    }
+
+    return pendingAmount;
+};
+
+
+router.post('/getadmindashboard',async function (req, res, next) {
+    var admin_address = req.body.address;
+    var user = await get_user_by_address(admin_address);
+    if (user.is_admin){
+        let actualBalance = await get_actual_server_balance();
+        let pendingBalance = await get_server_pending();
+        let availableBalance = actualBalance + pendingBalance;
+        console.log(actualBalance);
+        console.log(pendingBalance);
+        User.count({},function(error,user_number){
+            if (error){
+                res.json({
+                    status: 0,
+                    message: 'Error counting users'
+                });
+            }
+            res.json({
+                status: 1,
+                message: "Got info successfully",
+                data: {
+                    available: availableBalance,
+                    actual: actualBalance,
+                    number_of_user : user_number
+                }
+            });
+        });
+    }else{
+        res.json({
+            status: 0,
+            message: "Access denined"
+        });
+    }
+    
+});
+
+GetUsers = function () {
+    return new Promise(resolve => {
+        User.find({}, function (error, users) {
+            if (error){
+                resolve([]);
+                return;
+            }
+            resolve(users);
+        })
+    });
+};
+
+
+router.post('/getuserinfo',async function (req, res, next) {
+    try {
+        let users = await GetUsers();
+        let data = [];
+        for (let index in users) {
+            let user = users[index];
+            let address = user.address;
+
+            let available = await GetBalance(address, 'available');
+            let unconfirmed = await GetBalance(address, 'actual');
+            console.log('available money '+ available);
+            console.log('unconfirmed money '+ unconfirmed);
+            let actual = available - unconfirmed;
+            data.push({
+                id: user._id,
+                email: user.email,
+                address,
+                actual,
+                available
+            });
+        }
+
+        res.json({
+            status: 1,
+            message: 'Got data successfully',
+            data
+        });
+    }
+    catch (e) {
+        res.json({
+            status: 0,
+            message: e.message
+        });
+    }
+});
+
+router.post('/getusertransaction',async function (req, res, next) {
+    var address = req.body.address;
+    var user_out = await get_user_by_address(address);
+   
+    if (user_out.is_admin){
+        let userId = req.body.id;
+        let user = await get_user_by_id(userId);
+        console.log('address here '+user.address);
+
+        let transactions = await get_l_trans(user.address, null, 0, null);
+        console.log(transactions);
+        res.json({
+            status: 1,
+            message: 'Got data successfully',
+            data: {
+                user: {
+                    id: user._id,
+                    email: user.email,
+                    address: user.address
+                },
+                transactions
+            }
+        });
+    }else{
+    res.json({
+        status: 0,
+        message: 'Invalid access',
+        data
+    });
+}
+});
+
+router.post('/getalltransactions', async function (req, res, next) {
+    var address = req.body.address;
+    var user_out = await get_user_by_address(address);
+    if (user_out.is_admin){
+        let remoteTransactions = await get_remote_trans();
+        console.log('remote-trans'+remoteTransactions);
+        let userList = {};
+        let data = [];
+        for (let index in remoteTransactions) {
+            let transaction = remoteTransactions[index];
+            let receive_address = transaction.receive_address;
+
+            if (!userList[receive_address]){
+                let user = await get_user_by_address(receive_address);
+                userList[receive_address] = user;
+            }
+
+            data.push({
+                hash: transaction.src_hash,
+                index: transaction.index,
+                receive_address: transaction.receive_address,
+                email: userList[receive_address] ? userList[receive_address].email : null,
+                amount: transaction.amount,
+                status: transaction.status
+            });
+        }
+
+        res.json({
+            status: 1,
+            message: 'Got data successfully',
+            data
+        });
+    }else{
+        res.json({
+            status: 0,
+            message: 'Invalid access',
+            data
+        });
+    }
+
+});
+
+
 module.exports = router;
