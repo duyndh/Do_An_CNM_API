@@ -60,12 +60,12 @@ app.use(function(req, res, next) {
 });
 
 email_transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 465,
+  host: 'mail.smtp2go.com',
+  port: 2525,
   secure: true, // secure:true for port 465, secure:false for port 587
   auth: {
-      user: 'duyychiha9@gmail.com',
-      pass: '12345677a'
+      user: 'smtpusername3',
+      pass: 'aXNwOGgzemRuaHMw'
   }
 });
 // error handler
