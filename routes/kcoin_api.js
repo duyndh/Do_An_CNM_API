@@ -33,13 +33,32 @@ function get_l_trans (address, sort = null, offset = 0, limit = 10) {
     });
 }
 
+function get_l_trans_2 (address, sort = null, offset = 0, limit = 10) {
+    return new Promise(resolve => {
+        let query = Transaction.find({$or: [{send_address: address},{$and: [{receive_address: address},{status: {$ne: 'init'}}]}],status: {$ne: 'invalid' }}).find({'is_local':true}).find({'status':'init'}).skip(offset).limit(limit);
+        // console.log('query 1:'+query);
+        // console.log('query 2:'+util.inspect(query));
+        if (sort) {
+            query = query.sort({created_at: 'descending'});
+        }
+
+        query.exec(function (error, transactions) {
+            if (!transactions) {
+                resolve([]);
+                return;
+            }
+            resolve(transactions);
+        })
+    });
+}
+
 router.post('/gettrans',async function (req, res, next) {
     try {
         let address = req.body.address;
         let offset  = typeof req.query.offset !== 'undefined' ? req.query.offset : 0;
         let limit   = typeof req.query.limit !== 'undefined' ? req.query.limit : 10;
         // Transaction.find({address},)
-        let result  = await get_l_trans(address, true, offset, limit);
+        let result  = await get_l_trans_2(address, true, offset, limit);
         console.log(result);
         res.json({
             status: 1,
@@ -60,15 +79,16 @@ router.post('/gettrans',async function (req, res, next) {
 
 function post_request (url, data) {
  
+    return new Promise(resolve => {
         let options = {
             uri: url,
             method: 'POST',
             json: data
         };
         request(options, function (error, response, body) {
-            return(body);
+            resolve(body);
         });
-
+    });
 };
 
 SendGetRequest = function (url) {
@@ -235,40 +255,6 @@ GetBalance = async function(address, type = 'available') {
 };
 
 router.post('/user-dashboard', async function(req,res,next){
-    // var balance_address = req.body.balance_address;
-    // var user_usable_balance = 0;
-    // var user_current_balance = 0;
-    // console.log(balance_address);
-    // user_usable_balance = await GetBalance(balance_address,'available');
-
-    // user_current_balance = await GetBalance(balance_address,'actual');
-    
-    // // if (user_current_balance < user_usable_balance)
-    // // {
-    // //     user_current_balance = user_usable_balance;
-    // // }
-    
-    // User.findOne({address: balance_address},function(error,data){
-    //     if (error){
-    //         res.json({
-    //             status: 0,
-    //             message: 'Get data fail'
-    //         });
-            
-    //     }
-
-    //     res.json({
-    //         status: 1,
-    //         message: 'Get data success',
-    //         data: {
-    //             name: data.name,
-    //             address: data.address,
-    //             usable_balance : user_usable_balance,
-    //             current_balance : user_current_balance
-    //         }
-    //   });
-     
-    // });
 
         let address = req.body.balance_address;
        
@@ -507,8 +493,8 @@ router.post('/create-transaction',async function(req,res,next){
         });
         return;
     }
-    var user = get_user_by_address(send_address);
-    console.log(user);
+    var user = await get_user_by_address(send_address);
+    //console.log(user);
     if (!user) { // is send money to external transaction
         var availableBalance = await get_actual_server_balance();
         console.log('Available balance of server : '+ availableBalance);
@@ -521,7 +507,7 @@ router.post('/create-transaction',async function(req,res,next){
         }
     }
     if (user){
-            var check = User.find({address:receive_address},function(error,local_address){
+            User.find({address:receive_address},function(error,local_address){
                 if (error){
                     res.json({
                         status: 0,
@@ -537,6 +523,7 @@ router.post('/create-transaction',async function(req,res,next){
                     });
                     return;
                 }
+                let twoFACode = Generate2FACode();
                 var current_time =  new Date();
                 newTransaction.is_local = true;
                 newTransaction.send_address = send_address;
@@ -545,20 +532,49 @@ router.post('/create-transaction',async function(req,res,next){
                 newTransaction.remaining_amount = amount;
                 newTransaction.status = 'init';
                 newTransaction.created_at = current_time.toString();
+                newTransaction.two_fa_code = twoFACode;
                 console.log(newTransaction);
                 newTransaction.save(function (err, tx) {
                     //resolve(tx);
+                    console.log('new trans : ' + tx);
                 });
-                SendCreateTransactionConfirmationEmail(newTransaction._id);
-                res.json({
-                    status: 1,
-                    message: 'New transaction created',
-                    data: {
-                        transaction_id: newTransaction._id
+            
+                console.log('2fa code : ' + twoFACode);
+                console.log('send user ' + user );
+                //process.exit();
+                let srcAddress = newTransaction.send_address;
+                let email = user.email;
+                console.log('user email '+ email);
+                let mailOptions = {
+                    from: `KCoin Management <duyychiha9@gmail.com>`,
+                    to: email,
+                    subject: 'KCoin - Confirm new transaction',
+                    text: 'Confirm new transaction: ',// plain text body
+                    html: 'You just send to <b>'+newTransaction.receive_address+'</b> : <b>'+newTransaction.amount+'</b> Kcoin. <br>Your verification code is: <b>'+twoFACode+'</b><br>Click <a href="http://localhost:3000/user/user-confirm/'+ newTransaction._id +'">here</a> to confirm your transaction.'
+                };
+                console.log('mail options '+ util.inspect(mailOptions));
+                email_transporter.sendMail(mailOptions, function (error, info) {
+                    if (error) {
+                        console.log('Email error : ' + util.inspect(error));
+                        res.json({
+                            status: 0,
+                            message: 'Send confirmation email failed!'
+                        });
+                        return;
                     }
-                    
+                    res.json({
+                        status: 1,
+                        message: 'New transaction created',
+                        data: {
+                            transaction_id: newTransaction._id
+                        }
+                        
+                    });
+                    return;
                 });
-                return;
+
+                //
+               
         });
 
         }
@@ -569,68 +585,6 @@ Generate2FACode = function () {
     let str = "";
     for ( ; str.length < length; str += Math.random().toString( 36 ).substr( 2 ) );
     return str.substr( 0, length ).toUpperCase();
-};
-
-SendEmail = function (emailOption) {
-    return new Promise(resolve => {
-        email_transporter.sendMail(emailOption, function (error, info) {
-            if (error){
-                console.log(error);
-                resolve(false);
-            }
-            else {
-                resolve(true);
-            }
-        });
-    })
-  };
-
-SendCreateTransactionConfirmationEmail = async function (transactionId) {
-    try {
-        //let transactionId = req.params.transactionId;
-        let transaction = await get_trans_by_id(transactionId);
-        if (!transaction) {
-            res.json({
-                status: 0,
-                message: 'Transaction not found!'
-            });
-            return;
-        }
-
-        let twoFACode = Generate2FACode();
-        transaction.two_fa_code = twoFACode;
-        transaction = await update_trans(transaction);
-
-        let srcAddress = transaction.send_address;
-        let user = await get_user_by_address(srcAddress);
-        let email = user.email;
-
-        let mailOptions = {
-            from: `KCoin Management <duyychiha9@gmail.com>`,
-            to: email,
-            subject: 'KCoin - Confirm new transaction',
-            html: `You just send to <b>${Transaction.receive_address}</b> : <b>${Transaction.amount}</b><br>Your verification code is: <b>${twoFACode}</b><br>Click <a href="http://localhost:3000/user/user-confirm/${Transaction._id}">here</a> to confirm your transaction.`
-        };
-        let sendEmailResult = await SendEmail(mailOptions);
-        if (sendEmailResult) {
-            res.json({
-                status: 1,
-                message: 'A confirmation email has been sent.'
-            });
-        }
-        else {
-            res.json({
-                status: 0,
-                message: 'Unknown error!'
-            });
-        }
-    }
-    catch (e) {
-        res.json({
-            status: 0,
-            message: e.message
-        });
-    }
 };
 
 
@@ -652,38 +606,6 @@ function update_trans(localTx) {
     });
 }
 
-function sign_trans_req (inputs, outputs) {
-    // Generate transactions
-    let bountyTransaction = {
-        version: 1,
-        inputs: [],
-        outputs: []
-    };
-
-    let keys = [];
-
-    inputs.forEach(input => {
-        bountyTransaction.inputs.push({
-            referencedOutputHash: input.source.referencedOutputHash,
-            referencedOutputIndex: input.source.referencedOutputIndex,
-            unlockScript: ''
-        });
-        keys.push(input.key);
-    });
-
-    // Output to all destination 10000 each
-    outputs.forEach(output => {
-        bountyTransaction.outputs.push({
-            value: output.value,
-            lockScript: 'ADD ' + output.address
-        });
-    });
-
-    // Sign
-    SignTransaction(bountyTransaction, keys);
-
-    return bountyTransaction;
-}
 
 function update_r_trans(remoteTx) {
     return new Promise(resolve => {
@@ -694,8 +616,9 @@ function update_r_trans(remoteTx) {
 }
 
 
-function build_trans_req(transactionId, srcAddress, dstAddress, amount) {
-    let freeTransactions = get_free_remote_trans();
+async function build_trans_req(transactionId, srcAddress, dstAddress, amount) {
+    let freeTransactions = await get_free_remote_trans();
+    console.log('free transactions : '+ freeTransactions);
     let useResources = [];
     let remainingAmount = amount;
     for (let index in freeTransactions) {
@@ -704,7 +627,7 @@ function build_trans_req(transactionId, srcAddress, dstAddress, amount) {
 
         freeTransaction.status = 'used';
         freeTransaction.reason = transactionId;
-        let updatedTransaction = update_r_trans(freeTransaction);
+        let updatedTransaction = await update_r_trans(freeTransaction);
 
         remainingAmount -= freeTransaction.amount;
         if (remainingAmount <= 0)
@@ -728,9 +651,11 @@ function build_trans_req(transactionId, srcAddress, dstAddress, amount) {
     let inputs = [];
     for (let index in useResources) {
         let resource = useResources[index];
-        let address = resource.dst_addr;
-
-        let user = get_user_by_address(address);
+        console.log('resources here '+ resource);
+        let address = resource.receive_address;
+        console.log('build trans address : ' + address);
+        let user = await get_user_by_address(address);
+        //console.log('build trans user : ' + user);
         let key = {
             privateKey: user.private_key,
             publicKey: user.public_key,
@@ -747,81 +672,25 @@ function build_trans_req(transactionId, srcAddress, dstAddress, amount) {
     return {inputs, outputs}
 }
 
-function send_trans_req (transactionId, srcAddress, dstAddress, amount) {
-    let requestData = build_trans_req(transactionId, srcAddress, dstAddress, amount);
-    let signedRequest = sign_trans_req(requestData.inputs, requestData.outputs);
-
-    console.log(signedRequest);
+async function send_trans_req (transactionId, srcAddress, dstAddress, amount) {
+    //console.log('transactionId: '+ transactionId + ' srcAddress : '+ srcAddress+ ' dstAddress :  '+ dstAddress + ' amount '+ amount);
+    let requestData = await build_trans_req(transactionId, srcAddress, dstAddress, amount);
+    console.log('requested data ' + util.inspect(requestData));
+    //process.exit();
+    let signedRequest = await sign_trans_request(requestData.inputs, requestData.outputs);
+    
+    console.log('signed trans req' + util.inspect(signedRequest));
 
     let url = 'https://api.kcoin.club/transactions';
-    let requestResult = post_request(url, signedRequest);
-    console.log(requestResult);
+    let requestResult = await post_request(url, signedRequest);
+    console.log('reqest result here : ' + util.inspect(requestResult));
+    //process.exit();
     if (requestResult.code === 'InvalidContent') {
         return false;
     }
     return true;
 };
 
-
-
-function confirm_trans (user, req, res, next) {
-    try {
-        var transactionId = req.body.transaction_id;
-        let code          = req.body.code;
-        var transaction = Transaction.findById(transactionId,function(error,transaction){
-
-       
-        if (!transaction) {
-            res.json({
-                status: 0,
-                message: 'Transaction not found!'
-            });
-            return;
-        }
-
-        var dstAddress = transaction.receive_address;
-        var srcAddress = transaction.send_address;
-        var amount     = transaction.amount;
-        var user = get_user_by_address(dstAddress);
-
-        if (!user) { // send money to external system
-            transaction.remaining_amount = transaction.amount;
-            transaction.status = 'pending';
-
-            var sendRequestResult = send_trans_req(srcAddress, dstAddress, amount);
-            if (!sendRequestResult) {
-                res.json({
-                    status: 0,
-                    message: 'Failed to send create transaction request'
-                })
-            }
-        }
-        else {
-            transaction.remaining_amount = 0;
-            transaction.status = 'confimed'
-        }
- });
-        transaction = update_trans(transaction);
-        if (!transaction){
-            res.json({
-                status: 0,
-                message: 'Unknown error'
-            });
-            return;
-        }
-
-        res.json({
-            status: 1,
-            message: 'Your new transaction has been confirmed successfully.'
-        });
-    }
-    catch (e) {
-        res.json({
-            status: 0,
-            message: e.message
-        });
-    }
-};
 get_user_by_id = function (id) {
     return new Promise(resolve => {
         User.findById(id, function (error, user) {
@@ -923,7 +792,7 @@ function Signmessage(message, privateKeyHex){
     // Create private key form hex
     var privateKey = ursa.createPrivateKey(Buffer.from(privateKeyHex, 'hex'));
     // Create signer
-    var signer = ursa.createSigner(HASH_ALGORITHM);
+    var signer = ursa.createSigner('sha256');
     // Push message to verifier
     signer.update(message);
     // Sign
@@ -934,14 +803,14 @@ function sign_trans(transaction, keys) {
     var message = ToBinary(transaction, true);
     transaction.inputs.forEach((input, index) => {
         var key = keys[index];
-        var signature = SignMessage(message, key.privateKey);
+        var signature = Signmessage(message, key.privateKey);
         // Genereate unlock script
         input.unlockScript = 'PUB ' + key.publicKey + ' SIG ' + signature;
     });
 }
 
 
-function sign_trans_request(inputs, outputs){
+async function sign_trans_request(inputs, outputs){
     // Generate transactions
     var bountyTransaction = {
         version: 1,
@@ -975,87 +844,12 @@ function sign_trans_request(inputs, outputs){
 }
 
 
-function send_trans_request(user_id,send_address, receive_address, amount){
-    var useResources = [];
-    var remainingAmount = amount;
-    Transaction.find({status: 'available'}, function (error, available_balances) {
-        if (!transactions){
-            return;
-        }
-        for (var i in available_balances) {
-            var available_balance = available_balances[index];
-            useResources.push(available_balance);
-    
-            available_balance.status = 'invalid';
-            available_balance.save(function(error,transaction){
-                if(error){
-                    return;
-                }
-            });
-    
-            remainingAmount -= available_balance.amount;
-            if (remainingAmount <= 0)
-                break;
-        }
-    
-        var outputs = [
-            {
-                address: send_address,
-                value: amount
-            }
-        ];
-    
-        if (remainingAmount < 0) {
-            outputs.push({
-                address: send_address,
-                value: -remainingAmount
-            });
-        }
-    
-        var inputs = [];
-        for (var i in useResources) {
-            var resource = useResources[index];
-            var address = resource.send_address;
-            var user = get_user_by_id(user_id);
-            var key = {
-                privateKey: user.private_key,
-                publicKey: user.public_key,
-            };
-            var source = {
-                referencedOutputHash: resource.src_hash,
-                referencedOutputIndex: resource.index
-            };
-            inputs.push({source, key});
-        }
-
-        var requestData = {inputs, outputs};
-        var signedRequest = sign_trans_req(requestData.inputs, requestData.outputs);
-    
-        console.log(signedRequest);
-    
-        var url = 'https://api.kcoin.club/transactions';
-        var options = {
-            uri: url,
-            method: 'POST',
-            json: signedRequest
-        };
-        request(options, function (error, response, body) 
-        {
-            console.log(body);
-            if (body.code === 'InvalidContent') {
-                return false;
-            }
-            return true;
-        });
-    })
-}
-
 router.post('/confirm-transaction',async function(req,res,next){
     var transaction_id = req.body.transaction_id;
     var password = req.body.password;
     let code          = req.body.code;
-    console.log(transaction_id);
-    console.log(sender_address);
+    // console.log('confirm code ' + code);
+    // console.log('confirm password ' +password);
     Transaction.findById(transaction_id,function(error,data){
         if (error){
             res.json({
@@ -1079,26 +873,34 @@ router.post('/confirm-transaction',async function(req,res,next){
             return;
         }
 
-        console.log(data);
+        
         var receive_address = data.receive_address;
         var send_address = data.send_address;
         var amount     = data.amount;
-        var user = get_user_by_address(send_address);
-
-        console.log(user);
+        //var user = get_user_by_address(send_address);
+        User.findOne({'address':send_address},function(error,user){
+            console.log('data 2 '+ data);
+            console.log('user 2 '+ user);
+            if (error){
+                console.log('user error here : ' + error);
+                res.json({
+                    status: 0,
+                    message: 'Error getting user address!'
+                });
+                return;
+            }
             if (!user){
                 data.remaining_amount = data.amount;
                 data.status = 'pending';
     
-                var sendRequestResult = send_trans_request(send_address, receive_address, amount);
+                var sendRequestResult = send_trans_req(transaction_id,send_address, receive_address, amount);
                 if (!sendRequestResult) {
                     res.json({
                         status: 0,
                         message: 'Failed to send create transaction request'
                     })
                 }
-            }
-            else {
+            }else {
                 if (user.validPassword(password)){
                     data.remaining_amount = 0;
                     data.status = 'done'
@@ -1125,6 +927,10 @@ router.post('/confirm-transaction',async function(req,res,next){
                 
         
             }
+        });
+        //console.log(user);
+            
+
             
     });
 });
@@ -1137,15 +943,6 @@ function get_user_by_address(address){
         });
     });
 }
-
-
-// function update_strans(transactions) {
-//     return new Promise(resolve => {
-//         transactions.save(function (err, tx) {
-//             resolve(tx);
-//         });
-//     });
-// }
 
 
 function get_remote_trans_by_hash(hash, index) {
