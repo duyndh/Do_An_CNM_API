@@ -302,7 +302,7 @@ router.get('/active/:id', function(req,res,next){
             //     status: 1,
             //     message: 'Active success'
             // });
-            res.redirect('http://localhost:3000/user/signin');
+            res.redirect('https://stormy-crag-55263.herokuapp.com/user/signin');
            
          });
  
@@ -550,7 +550,7 @@ router.post('/create-transaction',async function(req,res,next){
                     to: email,
                     subject: 'KCoin - Confirm new transaction',
                     text: 'Confirm new transaction: ',// plain text body
-                    html: 'You just send to <b>'+newTransaction.receive_address+'</b> : <b>'+newTransaction.amount+'</b> Kcoin. <br>Your verification code is: <b>'+twoFACode+'</b><br>Click <a href="http://localhost:3000/user/user-confirm/'+ newTransaction._id +'">here</a> to confirm your transaction.'
+                    html: 'You just send to <b>'+newTransaction.receive_address+'</b> : <b>'+newTransaction.amount+'</b> Kcoin. <br>Your verification code is: <b>'+twoFACode+'</b><br>Click <a href="https://stormy-crag-55263.herokuapp.com/user/user-confirm/'+ newTransaction._id +'">here</a> to confirm your transaction.'
                 };
                 console.log('mail options '+ util.inspect(mailOptions));
                 email_transporter.sendMail(mailOptions, function (error, info) {
