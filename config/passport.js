@@ -5,7 +5,7 @@ var Balance = require('../model/balance');
 const nodemailer = require('nodemailer');
 var randomstring = require("randomstring");
 
-var LocalStrategy = require('passport-local').Strategy;
+// var LocalStrategy = require('passport-local').Strategy;
 
 passport.serializeUser(function(user, done){
   done(null, user.id);
